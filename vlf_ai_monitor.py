@@ -23,7 +23,7 @@ CENTER_FREQ       = 24_000_000
 GAIN              = 49.6
 FFT_SIZE          = 131072
 SCAN_INTERVAL     = 2.0
-SNR_THRESHOLD     = 8.0
+SNR_THRESHOLD     = 5.0
 AUDIO_SECONDS     = 5
 OLLAMA_MODEL      = "shadow-ai"
 OLLAMA_URL        = "http://localhost:11434/api/generate"
@@ -32,9 +32,9 @@ RECEIVER_LON      = 0.0
 RECEIVER_NAME     = "Unknown"
 
 # ─── Filter Settings ───────────────────────────────────────────────────────────
-PERSISTENCE_SCANS   = 2
+PERSISTENCE_SCANS   = 1
 HARMONIC_TOLERANCE  = 30
-MAX_BANDWIDTH_HZ    = 150
+MAX_BANDWIDTH_HZ    = 999
 FREQ_STABILITY_HZ   = 80
 MIN_SNR_FOR_AUDIO   = 12.0
 DUPLICATE_WINDOW_HZ = 300
@@ -301,7 +301,7 @@ def apply_filters(freq_hz,snr_db,bw,tracker):
     if is_h:return False,f"50Hz harmonic #{int(hf/50)}","HARMONIC"
     if bw>MAX_BANDWIDTH_HZ:return False,f"Too wide ({bw:.0f}Hz)","BANDWIDTH"
     drift=tracker.get_stability(freq_hz)
-    if drift>FREQ_STABILITY_HZ:return False,f"Unstable ({drift:.0f}Hz)","STABILITY"
+    pass  # stability disabled
     if snr_db<SNR_THRESHOLD:return False,f"Weak ({snr_db:.1f}dB)","SNR"
     return True,"PASSED","NONE"
 
