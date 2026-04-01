@@ -456,8 +456,10 @@ def print_detection(freq_hz, snr_db, bw, station, ai_result, audio_file,
         print(f"  {C.YELLOW}Operator{C.RESET}: {info['operator']}")
         print(f"  {C.YELLOW}Power   {C.RESET}: {info['power_kw']} kW | Mode: {info.get('mode','?')}")
         print(f"  {C.YELLOW}Purpose {C.RESET}: {info['purpose']}")
-        print(f"  {C.YELLOW}Distance{C.RESET}: {dist_km:,} km | Notes: {info['notes']}")
-        print(f"\n  {C.BOLD}🧭 Point antenna {compass} ({bearing:.0f}°) from {RECEIVER_NAME}{C.RESET}")
+        print(f"  {C.YELLOW}Notes   {C.RESET}: {info['notes']}")
+        if source == 'rtlsdr':
+            print(f"  {C.YELLOW}Distance{C.RESET}: {dist_km:,} km")
+            print(f"\n  {C.BOLD}🧭 Point antenna {compass} ({bearing:.0f}°) from {RECEIVER_NAME}{C.RESET}")
     else:
         print(f"\n  {C.RED}⚠️  Unknown — not in database{C.RESET}")
 
@@ -483,6 +485,38 @@ def print_detection(freq_hz, snr_db, bw, station, ai_result, audio_file,
     print(f"  {C.GRAY}💾 {BASE_DIR}/{C.RESET}")
 
 # ─── Mode Selection ────────────────────────────────────────────────────────────
+def select_kiwi_server():
+    """Let user manually select which KiwiSDR to use."""
+    servers_with_info = [
+        {"ip":"185.238.204.191","port":8073,"location":"Zakroczym, Poland",  "country":"Poland",    "lat":52.35,"lon":20.60,  "best_for":"European/Indian Navy stations"},
+        {"ip":"69.204.142.218", "port":8073,"location":"Canaan, USA",        "country":"USA",       "lat":41.93,"lon":-73.40, "best_for":"US Navy NAA/NLK/NPM stations"},
+        {"ip":"103.77.224.1",   "port":8073,"location":"Singapore",          "country":"Singapore", "lat":1.35, "lon":103.82, "best_for":"Asian/Australian stations"},
+        {"ip":"117.20.49.163",  "port":8073,"location":"Tokyo, Japan",       "country":"Japan",     "lat":35.68,"lon":139.69, "best_for":"JMSDF/Chinese Navy stations"},
+        {"ip":"180.150.5.136",  "port":8073,"location":"Sydney, Australia",  "country":"Australia", "lat":-33.87,"lon":151.21,"best_for":"NWC Harold E. Holt station"},
+        {"ip":"5.9.52.32",      "port":8073,"location":"Helsinki, Finland",  "country":"Finland",   "lat":60.17,"lon":24.94,  "best_for":"Russian/NATO stations"},
+        {"ip":"46.29.238.230",  "port":8073,"location":"Nuremberg, Germany", "country":"Germany",   "lat":49.45,"lon":11.07,  "best_for":"NATO/Russian/Indian stations"},
+    ]
+
+    print(f"\n  {C.CYAN}Select KiwiSDR source:{C.RESET}\n")
+    for i, s in enumerate(servers_with_info):
+        dist = round(haversine(RECEIVER_LAT, RECEIVER_LON, s["lat"], s["lon"]))
+        print(f"  {C.GREEN}[{i+1}]{C.RESET} {s['location']:30} {dist:6,} km  — {C.GRAY}{s['best_for']}{C.RESET}")
+
+    print(f"  {C.GREEN}[A]{C.RESET} Auto-select nearest")
+    print()
+
+    while True:
+        choice = input(f"  {C.YELLOW}Enter 1-{len(servers_with_info)} or A: {C.RESET}").strip().upper()
+        if choice == "A":
+            return select_nearest_kiwi(RECEIVER_LAT, RECEIVER_LON, n=1)[0]
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(servers_with_info):
+                return servers_with_info[idx]
+        except:
+            pass
+        print(f"  {C.RED}Invalid choice{C.RESET}")
+
 def select_mode():
     os.system("clear")
     print(f"{C.CYAN}{C.BOLD}")
@@ -499,9 +533,8 @@ def select_mode():
     print()
     print(f"  {C.BLUE}[2] Online KiwiSDR{C.RESET}")
     print(f"      → No hardware needed")
-    print(f"      → Uses remote receivers worldwide")
-    print(f"      → Works from anywhere, any device")
-    print(f"      → Auto-selects nearest server")
+    print(f"      → Choose from 7 global receivers")
+    print(f"      → Works from anywhere")
     print()
 
     while True:
@@ -574,7 +607,7 @@ def run_rtlsdr(ai_ready, sid, verify_servers):
                 station=find_station(fhz)
 
                 print(f"\n  {C.CYAN}⏳ Cross-verifying {fhz/1000:.3f} kHz...{C.RESET}")
-                cv=None  # disabled in KiwiSDR mode
+                cv=cross_verify(fhz,snr,verify_servers)
 
                 ai_result=analyze(ai_ready,fhz,snr,bw,80,station,cv,"rtlsdr")
 
@@ -591,7 +624,7 @@ def run_rtlsdr(ai_ready, sid, verify_servers):
                     "timestamp":datetime.datetime.now().isoformat(),
                     "source":"rtlsdr","freq_khz":round(fhz/1000,3),
                     "snr_db":round(snr,1),"station":info.get("name","Unknown"),
-                    "cross_verified": cv["verified"] if cv else False,"audio_file":audio_file,
+                    "cross_verified":cv["verified"],"audio_file":audio_file,
                     "ai_analysis":ai_result
                 },sid)
                 session_log.append({"freq_khz":round(fhz/1000,3),"station":info.get("name","Unknown"),"snr_db":round(snr,1)})
@@ -669,7 +702,7 @@ def run_kiwisdr(ai_ready, sid, kiwi_source, verify_servers):
 
                     # Cross-verify on different KiwiSDR
                     print(f"\n  {C.CYAN}⏳ Cross-verifying {freq_khz:.3f} kHz...{C.RESET}")
-                    cv=None  # disabled in KiwiSDR mode
+                    cv=cross_verify(fhz,snr,verify_servers)
 
                     # Record audio from KiwiSDR
                     audio_file=None
@@ -689,7 +722,7 @@ def run_kiwisdr(ai_ready, sid, kiwi_source, verify_servers):
                         "source":"kiwisdr","freq_khz":round(freq_khz,3),
                         "rssi_dbm":rssi,"snr_db":round(snr,1),
                         "station":info.get("name","Unknown"),
-                        "cross_verified": cv["verified"] if cv else False,"audio_file":audio_file,
+                        "cross_verified":cv["verified"],"audio_file":audio_file,
                         "ai_analysis":ai_result
                     },sid)
                     session_log.append({"freq_khz":round(freq_khz,3),"station":info.get("name","Unknown"),"snr_db":round(snr,1)})
@@ -725,17 +758,18 @@ def main():
     print(f"  {C.GREEN}✅ Location: {RECEIVER_NAME} ({RECEIVER_LAT:.2f}°, {RECEIVER_LON:.2f}°){C.RESET}")
 
     # Select KiwiSDRs
-    nearest = [{"ip":"185.238.204.191","port":8073,"location":"Zakroczym, Poland","country":"Poland","lat":52.35,"lon":20.60},{"ip":"69.204.142.218","port":8073,"location":"Canaan, USA","country":"USA","lat":41.93,"lon":-73.40}]
-    KIWI_SERVERS = nearest
-
     if MODE == "kiwisdr":
-        kiwi_source    = nearest[0]
-        verify_servers = nearest[1:] if len(nearest)>1 else nearest
+        kiwi_source = select_kiwi_server()
         dist = round(haversine(RECEIVER_LAT,RECEIVER_LON,kiwi_source["lat"],kiwi_source["lon"]))
         print(f"  {C.GREEN}✅ KiwiSDR source: {kiwi_source['location']} ({dist:,} km){C.RESET}")
+        # Cross-verify on Poland or USA (most reliable)
+        verify_servers = [{"ip":"185.238.204.191","port":8073,"location":"Zakroczym, Poland","country":"Poland","lat":52.35,"lon":20.60}]
+        KIWI_SERVERS = [kiwi_source] + verify_servers
     else:
         kiwi_source    = None
+        nearest        = select_nearest_kiwi(RECEIVER_LAT, RECEIVER_LON, n=2)
         verify_servers = nearest
+        KIWI_SERVERS   = nearest
 
     print(f"  {C.GREEN}✅ Cross-verify: {', '.join(s['location'] for s in verify_servers)}{C.RESET}")
 
